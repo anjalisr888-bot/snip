@@ -16,3 +16,7 @@ custom rate limiter are planned next.
 2. `pip install -r requirements.txt`
 3. `uvicorn app.main:app --reload`
 4. Open http://localhost:8000/docs
+## Features
+- Shorten URLs with auto-generated base62 codes
+- Custom aliases (409 if taken, validated, reserved words blocked)
+- Optional link expiry (`expires_in_days`, 410 when expired)
