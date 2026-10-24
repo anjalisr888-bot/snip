@@ -1,4 +1,6 @@
+import re
 from datetime import datetime, timezone
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, HttpUrl
@@ -8,24 +10,54 @@ from app.utils import encode
 
 app = FastAPI()
 
+ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,30}$")
+RESERVED = {"docs", "redoc", "openapi.json", "shorten", "favicon.ico"}
+
 
 class ShortenRequest(BaseModel):
-    url: HttpUrl  # rejects anything that isn't a valid http/https URL
+    url: HttpUrl
+    alias: str | None = None
 
 
 @app.post("/shorten")
 def shorten(req: ShortenRequest):
+    long_url = str(req.url)
+
+    # Custom alias
+    if req.alias is not None:
+        if not ALIAS_PATTERN.match(req.alias):
+            raise HTTPException(
+                status_code=422,
+                detail="Alias must be 3-30 characters: letters, numbers, - or _",
+            )
+        if req.alias.lower() in RESERVED:
+            raise HTTPException(status_code=422, detail="This alias is reserved")
+
+        with get_conn() as conn:
+            row = conn.execute(
+                "INSERT INTO urls (short_code, long_url) VALUES (%s, %s) "
+                "ON CONFLICT (short_code) DO NOTHING RETURNING id",
+                (req.alias, long_url),
+            ).fetchone()
+
+        if row is None:
+            raise HTTPException(status_code=409, detail="Alias already taken")
+        return {"short_code": req.alias}
+
+    # Auto-generated code: skip any code that is already taken
     with get_conn() as conn:
-        # Reserve the next ID first, so we can compute the code before inserting
-        new_id = conn.execute(
-            "SELECT nextval(pg_get_serial_sequence('urls', 'id'))"
-        ).fetchone()[0]
-        code = encode(new_id)
-        conn.execute(
-            "INSERT INTO urls (id, short_code, long_url) VALUES (%s, %s, %s)",
-            (new_id, code, str(req.url)),
-        )
-    return {"short_code": code}
+        while True:
+            new_id = conn.execute(
+                "SELECT nextval(pg_get_serial_sequence('urls', 'id'))"
+            ).fetchone()[0]
+            code = encode(new_id)
+            row = conn.execute(
+                "INSERT INTO urls (id, short_code, long_url) VALUES (%s, %s, %s) "
+                "ON CONFLICT (short_code) DO NOTHING RETURNING id",
+                (new_id, code, long_url),
+            ).fetchone()
+            if row is not None:
+                return {"short_code": code}
 
 
 @app.get("/{short_code}")
