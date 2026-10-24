@@ -1,9 +1,9 @@
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl
 
 from app.db import get_conn
 from app.utils import encode
@@ -17,11 +17,16 @@ RESERVED = {"docs", "redoc", "openapi.json", "shorten", "favicon.ico"}
 class ShortenRequest(BaseModel):
     url: HttpUrl
     alias: str | None = None
+    expires_in_days: int | None = Field(default=None, ge=1, le=365)
 
 
 @app.post("/shorten")
 def shorten(req: ShortenRequest):
     long_url = str(req.url)
+
+    expires_at = None
+    if req.expires_in_days is not None:
+        expires_at = datetime.now(timezone.utc) + timedelta(days=req.expires_in_days)
 
     # Custom alias
     if req.alias is not None:
@@ -35,9 +40,9 @@ def shorten(req: ShortenRequest):
 
         with get_conn() as conn:
             row = conn.execute(
-                "INSERT INTO urls (short_code, long_url) VALUES (%s, %s) "
+                "INSERT INTO urls (short_code, long_url, expires_at) VALUES (%s, %s, %s) "
                 "ON CONFLICT (short_code) DO NOTHING RETURNING id",
-                (req.alias, long_url),
+                (req.alias, long_url, expires_at),
             ).fetchone()
 
         if row is None:
@@ -52,9 +57,9 @@ def shorten(req: ShortenRequest):
             ).fetchone()[0]
             code = encode(new_id)
             row = conn.execute(
-                "INSERT INTO urls (id, short_code, long_url) VALUES (%s, %s, %s) "
+                "INSERT INTO urls (id, short_code, long_url, expires_at) VALUES (%s, %s, %s, %s) "
                 "ON CONFLICT (short_code) DO NOTHING RETURNING id",
-                (new_id, code, long_url),
+                (new_id, code, long_url, expires_at),
             ).fetchone()
             if row is not None:
                 return {"short_code": code}
