@@ -10,6 +10,7 @@ custom rate limiter are planned next.
 - Custom aliases (409 if taken, validated, reserved words blocked)
 - Shorten URLs with auto-generated base62 codes
 - Optional link expiry (`expires_in_days`, 410 when expired)
+- Click analytics: total clicks, clicks per day, top referrers (`GET /stats/{code}`)
 
 ## Tech stack
 - Python, FastAPI
