@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -11,7 +11,7 @@ from app.utils import encode
 app = FastAPI()
 
 ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,30}$")
-RESERVED = {"docs", "redoc", "openapi.json", "shorten", "favicon.ico"}
+RESERVED = {"docs", "redoc", "openapi.json", "shorten", "favicon.ico", "stats"}
 
 
 class ShortenRequest(BaseModel):
@@ -65,19 +65,63 @@ def shorten(req: ShortenRequest):
                 return {"short_code": code}
 
 
-@app.get("/{short_code}")
-def redirect(short_code: str):
+@app.get("/stats/{short_code}")
+def stats(short_code: str):
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT long_url, expires_at FROM urls WHERE short_code = %s",
+            "SELECT id, long_url FROM urls WHERE short_code = %s", (short_code,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Short link not found")
+        url_id, long_url = row
+
+        total = conn.execute(
+            "SELECT count(*) FROM clicks WHERE url_id = %s", (url_id,)
+        ).fetchone()[0]
+
+        per_day = conn.execute(
+            "SELECT clicked_at::date AS day, count(*) FROM clicks "
+            "WHERE url_id = %s GROUP BY day ORDER BY day",
+            (url_id,),
+        ).fetchall()
+
+        referrers = conn.execute(
+            "SELECT COALESCE(referrer, 'direct') AS ref, count(*) FROM clicks "
+            "WHERE url_id = %s GROUP BY ref ORDER BY count(*) DESC LIMIT 10",
+            (url_id,),
+        ).fetchall()
+
+    return {
+        "short_code": short_code,
+        "long_url": long_url,
+        "total_clicks": total,
+        "clicks_per_day": [{"date": str(d), "clicks": c} for d, c in per_day],
+        "top_referrers": [{"referrer": r, "clicks": c} for r, c in referrers],
+    }
+
+
+@app.get("/{short_code}")
+def redirect(short_code: str, request: Request):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, long_url, expires_at FROM urls WHERE short_code = %s",
             (short_code,),
         ).fetchone()
 
-    if row is None:
-        raise HTTPException(status_code=404, detail="Short link not found")
+        if row is None:
+            raise HTTPException(status_code=404, detail="Short link not found")
 
-    long_url, expires_at = row
-    if expires_at and expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=410, detail="Link has expired")
+        url_id, long_url, expires_at = row
+        if expires_at and expires_at < datetime.now(timezone.utc):
+            raise HTTPException(status_code=410, detail="Link has expired")
+
+        conn.execute(
+            "INSERT INTO clicks (url_id, referrer, user_agent) VALUES (%s, %s, %s)",
+            (
+                url_id,
+                request.headers.get("referer"),
+                request.headers.get("user-agent"),
+            ),
+        )
 
     return RedirectResponse(long_url, status_code=302)

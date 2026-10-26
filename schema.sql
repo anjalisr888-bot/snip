@@ -5,3 +5,12 @@ CREATE TABLE urls (
     created_at  TIMESTAMPTZ DEFAULT now(),
     expires_at  TIMESTAMPTZ
 );
+CREATE TABLE clicks (
+    id          BIGSERIAL PRIMARY KEY,
+    url_id      BIGINT NOT NULL REFERENCES urls(id),
+    clicked_at  TIMESTAMPTZ DEFAULT now(),
+    referrer    TEXT,
+    user_agent  TEXT
+);
+
+CREATE INDEX idx_clicks_url_id ON clicks(url_id);
