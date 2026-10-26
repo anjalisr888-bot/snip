@@ -51,13 +51,26 @@ def test_expiry_limits():
 
 def test_expired_link_returns_410():
     alias = unique_alias()
-    client.post(
-        "/shorten",
-        json={"url": "https://www.wikipedia.org", "alias": alias, "expires_in_days": 1},
-    )
+    body = {"url": "https://www.wikipedia.org", "alias": alias, "expires_in_days": 1}
+    client.post("/shorten", json=body)
     with get_conn() as conn:
         conn.execute(
             "UPDATE urls SET expires_at = now() - interval '1 hour' WHERE short_code = %s",
             (alias,),
         )
     assert client.get(f"/{alias}", follow_redirects=False).status_code == 410
+
+
+def test_stats_counts_clicks():
+    alias = unique_alias()
+    client.post("/shorten", json={"url": "https://www.wikipedia.org", "alias": alias})
+    client.get(f"/{alias}", follow_redirects=False)
+    client.get(f"/{alias}", follow_redirects=False)
+
+    r = client.get(f"/stats/{alias}")
+    assert r.status_code == 200
+    assert r.json()["total_clicks"] == 2
+
+
+def test_stats_unknown_code():
+    assert client.get("/stats/doesnotexist999").status_code == 404
