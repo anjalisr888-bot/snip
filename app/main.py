@@ -5,10 +5,12 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, HttpUrl
 
+from app.cache import LRUCache
 from app.db import get_conn
 from app.utils import encode
 
 app = FastAPI()
+cache = LRUCache(1000)
 
 ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,30}$")
 RESERVED = {"docs", "redoc", "openapi.json", "shorten", "favicon.ico", "stats"}
@@ -102,16 +104,20 @@ def stats(short_code: str):
 
 @app.get("/{short_code}")
 def redirect(short_code: str, request: Request):
+    entry = cache.get(short_code)
+
     with get_conn() as conn:
-        row = conn.execute(
-            "SELECT id, long_url, expires_at FROM urls WHERE short_code = %s",
-            (short_code,),
-        ).fetchone()
+        if entry is None:
+            row = conn.execute(
+                "SELECT id, long_url, expires_at FROM urls WHERE short_code = %s",
+                (short_code,),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Short link not found")
+            entry = (row[0], row[1], row[2])
+            cache.put(short_code, entry)
 
-        if row is None:
-            raise HTTPException(status_code=404, detail="Short link not found")
-
-        url_id, long_url, expires_at = row
+        url_id, long_url, expires_at = entry
         if expires_at and expires_at < datetime.now(timezone.utc):
             raise HTTPException(status_code=410, detail="Link has expired")
 
