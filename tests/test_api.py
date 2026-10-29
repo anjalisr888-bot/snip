@@ -74,3 +74,12 @@ def test_stats_counts_clicks():
 
 def test_stats_unknown_code():
     assert client.get("/stats/doesnotexist999").status_code == 404
+def test_redirect_uses_cache():
+    from app.main import cache
+
+    alias = unique_alias()
+    client.post("/shorten", json={"url": "https://www.wikipedia.org", "alias": alias})
+    assert cache.get(alias) is None  # not cached before the first visit
+
+    client.get(f"/{alias}", follow_redirects=False)
+    assert cache.get(alias) is not None  # cached after the first visit
