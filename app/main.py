@@ -105,7 +105,6 @@ def stats(short_code: str):
 @app.get("/{short_code}")
 def redirect(short_code: str, request: Request):
     entry = cache.get(short_code)
-
     with get_conn() as conn:
         if entry is None:
             row = conn.execute(

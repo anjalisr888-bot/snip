@@ -22,5 +22,16 @@ custom rate limiter are planned next.
 2. `pip install -r requirements.txt`
 3. `uvicorn app.main:app --reload`
 4. Open http://localhost:8000/docs
+## Benchmark
+Load test with Locust: 20 users, 30 seconds, local machine, redirect endpoint only.
+
+| Setup | Requests/s | Median | 95th percentile |
+|---|---|---|---|
+| Without cache | 111 | 87 ms | 150 ms |
+| With custom LRU cache | 194 | 35 ms | 58 ms |
+
+The LRU cache is about 2.5x faster at the median and handles about 75% more
+requests per second. Every redirect still writes a click row, so the cache only
+removes the lookup query.
 
 
