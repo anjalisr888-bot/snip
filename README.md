@@ -33,5 +33,7 @@ Load test with Locust: 20 users, 30 seconds, local machine, redirect endpoint on
 The LRU cache is about 2.5x faster at the median and handles about 75% more
 requests per second. Every redirect still writes a click row, so the cache only
 removes the lookup query.
+- Custom LRU cache (hash map + doubly linked list) for fast redirects
+- Custom token bucket rate limiter (429 with Retry-After)
 
 
