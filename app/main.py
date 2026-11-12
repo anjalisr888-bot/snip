@@ -8,14 +8,36 @@ from pydantic import BaseModel, Field, HttpUrl
 from app.cache import LRUCache
 from app.db import get_conn
 from app.utils import encode
+import math
+
+from fastapi.responses import JSONResponse
+
+from app.ratelimit import RateLimiter
 
 app = FastAPI()
 cache = LRUCache(1000)
+limiter = RateLimiter(capacity=100, refill_rate=50)  # burst of 100, then 50 requests/second per IP
 
 ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,30}$")
 RESERVED = {"docs", "redoc", "openapi.json", "shorten", "favicon.ico", "stats"}
 
+EXEMPT_PATHS = {"/docs", "/redoc", "/openapi.json"}
 
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    if request.url.path in EXEMPT_PATHS:
+        return await call_next(request)
+
+    client_ip = request.client.host if request.client else "unknown"
+    allowed, retry_after = limiter.allow(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Too many requests"},
+            headers={"Retry-After": str(math.ceil(retry_after))},
+        )
+    return await call_next(request)
 class ShortenRequest(BaseModel):
     url: HttpUrl
     alias: str | None = None

@@ -82,4 +82,16 @@ def test_redirect_uses_cache():
     assert cache.get(alias) is None  # not cached before the first visit
 
     client.get(f"/{alias}", follow_redirects=False)
-    assert cache.get(alias) is not None  # cached after the first visit
+    assert cache.get(alias) is not None  
+def test_rate_limit_returns_429():
+    from app.main import limiter
+
+    original = limiter.buckets.copy()
+    limiter.buckets["testclient"] = [0.0, limiter.clock()]  # empty bucket for the test client
+    try:
+        r = client.get("/doesnotexist999", follow_redirects=False)
+        assert r.status_code == 429
+        assert "retry-after" in r.headers
+    finally:
+        limiter.buckets.clear()
+        limiter.buckets.update(original)
